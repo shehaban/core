@@ -3,12 +3,14 @@ import { PrimitiveComponent } from "../base-components/PrimitiveComponent"
 import { silkscreenTextProps } from "@tscircuit/props"
 import { decomposeTSR } from "transformation-matrix"
 import { normalizeTextForCircuitJson } from "lib/utils/normalizeTextForCircuitJson"
+import { resolvePcbProperty } from "lib/utils/pcbSx/resolve-pcb-property"
 
 export class SilkscreenText extends PrimitiveComponent<
   typeof silkscreenTextProps
 > {
   pcb_silkscreen_text_ids: string[] = []
   isPcbPrimitive = true
+  _footprinterFontSize?: number
 
   get config() {
     return {
@@ -50,11 +52,38 @@ export class SilkscreenText extends PrimitiveComponent<
     const targetLayers: LayerRef[] =
       uniqueLayers.size > 0 ? Array.from(uniqueLayers) : ["top"]
 
-    // Get font size from props, inherited pcbStyle, or default to 1
+    // Font size priority: explicit prop > resolvedPcbSx > pcbStyle > footprinter default > 1
+    const resolvedPcbSxFontSize = resolvePcbProperty({
+      propertyName: "fontSize",
+      resolvedPcbSx: this.getResolvedPcbSx(),
+      pathFromAmpersand: "silkscreentext",
+      component: this,
+    }) as number | undefined
+
     const fontSize =
       props.fontSize ??
+      resolvedPcbSxFontSize ??
       this.getInheritedProperty("pcbStyle")?.silkscreenFontSize ??
+      this._footprinterFontSize ??
       1
+
+    // Build knockout padding object from uniform or individual padding props
+    const uniformPadding = props.knockoutPadding ?? 0
+    const hasKnockoutPadding =
+      props.knockoutPadding !== undefined ||
+      props.knockoutPaddingLeft !== undefined ||
+      props.knockoutPaddingRight !== undefined ||
+      props.knockoutPaddingTop !== undefined ||
+      props.knockoutPaddingBottom !== undefined
+
+    const knockoutPadding = hasKnockoutPadding
+      ? {
+          left: props.knockoutPaddingLeft ?? uniformPadding,
+          right: props.knockoutPaddingRight ?? uniformPadding,
+          top: props.knockoutPaddingTop ?? uniformPadding,
+          bottom: props.knockoutPaddingBottom ?? uniformPadding,
+        }
+      : undefined
 
     for (const layer of targetLayers) {
       const pcb_silkscreen_text = db.pcb_silkscreen_text.insert({
@@ -71,6 +100,8 @@ export class SilkscreenText extends PrimitiveComponent<
         pcb_component_id: container.pcb_component_id!,
         subcircuit_id: subcircuit?.subcircuit_id ?? undefined,
         pcb_group_id: this.getGroup()?.pcb_group_id ?? undefined,
+        is_knockout: props.isKnockout,
+        knockout_padding: knockoutPadding,
       })
       this.pcb_silkscreen_text_ids.push(
         pcb_silkscreen_text.pcb_silkscreen_text_id,
@@ -80,9 +111,19 @@ export class SilkscreenText extends PrimitiveComponent<
 
   getPcbSize(): { width: number; height: number } {
     const { _parsedProps: props } = this
+
+    const resolvedPcbSxFontSize = resolvePcbProperty({
+      propertyName: "fontSize",
+      resolvedPcbSx: this.getResolvedPcbSx(),
+      pathFromAmpersand: "silkscreentext",
+      component: this,
+    }) as number | undefined
+
     const fontSize =
       props.fontSize ??
+      resolvedPcbSxFontSize ??
       this.getInheritedProperty("pcbStyle")?.silkscreenFontSize ??
+      this._footprinterFontSize ??
       1
     const text = props.text ?? ""
     const textWidth = text.length * fontSize

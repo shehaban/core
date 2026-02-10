@@ -58,6 +58,9 @@ export interface TscircuitElements {
   silkscreenrect: Props.SilkscreenRectProps
   silkscreencircle: Props.SilkscreenCircleProps
   tracehint: Props.TraceHintProps
+  courtyardcircle: Props.CourtyardCircleProps
+  courtyardoutline: Props.CourtyardOutlineProps
+  courtyardrect: Props.CourtyardRectProps
   pcbtrace: Props.PcbTraceProps
   fabricationnoterect: Props.FabricationNoteRectProps
   pcbnoteline: Props.PcbNoteLineProps

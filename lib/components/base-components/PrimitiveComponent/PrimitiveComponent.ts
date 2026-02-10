@@ -1,4 +1,6 @@
+import type { PcbSx } from "@tscircuit/props"
 import type { AnySourceComponent, LayerRef } from "circuit-json"
+import { getResolvedPcbSx } from "lib/utils/pcbSx/get-resolved-pcb-sx"
 import Debug from "debug"
 import { InvalidProps } from "lib/errors/InvalidProps"
 import type {
@@ -33,6 +35,7 @@ import {
   cssSelectPrimitiveComponentAdapterWithoutSubcircuits,
 } from "./cssSelectPrimitiveComponentAdapter"
 import { preprocessSelector } from "./preprocessSelector"
+import type { IsolatedCircuit } from "lib/IsolatedCircuit"
 
 const cssSelectOptionsInsideSubcircuit: Options<
   PrimitiveComponent,
@@ -96,6 +99,14 @@ export abstract class PrimitiveComponent<
     const myPropertyObject =
       this._parsedProps?.[propertyName as keyof z.infer<ZodProps>]
     return { ...parentPropertyObject, ...myPropertyObject }
+  }
+
+  getResolvedPcbSx(): PcbSx {
+    return getResolvedPcbSx({
+      parentResolvedPcbSx: this.parent?.getResolvedPcbSx?.(),
+      pcbStyle: this._parsedProps?.pcbStyle,
+      ownPcbSx: this._parsedProps?.pcbSx,
+    })
   }
 
   get lowercaseComponentName() {
@@ -652,7 +663,7 @@ export abstract class PrimitiveComponent<
     return this.root?._getBoard() as (PrimitiveComponent & BoardI) | undefined
   }
 
-  get root(): RootCircuit | null {
+  get root(): IsolatedCircuit | null {
     return this.parent?.root ?? null
   }
 
