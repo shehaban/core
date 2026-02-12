@@ -18,6 +18,10 @@ import {
 import type { INormalComponent } from "lib/components/base-components/NormalComponent/INormalComponent"
 
 export const portProps = commonPortProps.extend({
+  name: z.string().optional(),
+  pinNumber: z.number().optional(),
+  aliases: z.array(z.string()).optional(),
+  layer: z.string().optional(),
   layers: z.array(z.string()).optional(),
   schX: z.number().optional(),
   schY: z.number().optional(),
@@ -666,9 +670,8 @@ export class Port extends PrimitiveComponent<typeof portProps> {
 
     const sourcePort = db.source_port.get(this.source_port_id!)
 
-    const hasInversionCircle =
-      props.hasInversionCircle ??
-      (sourcePort?.port_hints?.some((hint) => hint.startsWith("INV_")) || false)
+    props.hasInversionCircle =
+      sourcePort?.port_hints?.some((hint) => hint.startsWith("INV_")) || false
     const schematicPortInsertProps: Omit<SchematicPort, "schematic_port_id"> = {
       type: "schematic_port",
       schematic_component_id: parentNormalComponent?.schematic_component_id!,
@@ -681,7 +684,7 @@ export class Port extends PrimitiveComponent<typeof portProps> {
       true_ccw_index: localPortInfo?.trueIndex,
       display_pin_label: bestDisplayPinLabel,
       is_connected: false,
-      is_drawn_with_inversion_circle: hasInversionCircle,
+      is_drawn_with_inversion_circle: props.hasInversionCircle,
     }
 
     for (const attributes of this._getMatchingPinAttributes()) {
