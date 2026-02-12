@@ -17,7 +17,7 @@ import {
 } from "@tscircuit/props"
 import type { INormalComponent } from "lib/components/base-components/NormalComponent/INormalComponent"
 
-export const portProps = commonPortProps.extend({
+export const portProps = z.object({
   name: z.string().optional(),
   pinNumber: z.number().optional(),
   aliases: z.array(z.string()).optional(),
@@ -670,7 +670,7 @@ export class Port extends PrimitiveComponent<typeof portProps> {
 
     const sourcePort = db.source_port.get(this.source_port_id!)
 
-    props.hasInversionCircle =
+    const hasInversionCircle =
       sourcePort?.port_hints?.some((hint) => hint.startsWith("INV_")) || false
     const schematicPortInsertProps: Omit<SchematicPort, "schematic_port_id"> = {
       type: "schematic_port",
@@ -684,7 +684,7 @@ export class Port extends PrimitiveComponent<typeof portProps> {
       true_ccw_index: localPortInfo?.trueIndex,
       display_pin_label: bestDisplayPinLabel,
       is_connected: false,
-      is_drawn_with_inversion_circle: props.hasInversionCircle,
+      is_drawn_with_inversion_circle: hasInversionCircle,
     }
 
     for (const attributes of this._getMatchingPinAttributes()) {
