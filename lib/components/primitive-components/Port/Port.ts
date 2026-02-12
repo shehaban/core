@@ -11,21 +11,20 @@ import type { Trace } from "../Trace/Trace"
 import type { LayerRef, SchematicPort } from "circuit-json"
 import { areAllPcbPrimitivesOverlapping } from "./areAllPcbPrimitivesOverlapping"
 import { getCenterOfPcbPrimitives } from "./getCenterOfPcbPrimitives"
-import type { PinAttributeMap } from "@tscircuit/props"
+import { type PinAttributeMap, portProps as commonPortProps } from "@tscircuit/props"
 import type { INormalComponent } from "lib/components/base-components/NormalComponent/INormalComponent"
 
 export const portProps = z.object({
-  name: z.string().optional(),
+    name: z.string().optional(),
   pinNumber: z.number().optional(),
   aliases: z.array(z.string()).optional(),
   layer: z.string().optional(),
-  layers: z.array(z.string()).optional(),
+    layers: z.array(z.string()).optional(),
   schX: z.number().optional(),
   schY: z.number().optional(),
   direction: z.enum(["up", "down", "left", "right"]).optional(),
   connectsTo: z.union([z.string(), z.array(z.string())]).optional(),
-  isDrawnWithInversionCircle: z.boolean().optional(),
-})
+  })
 
 export type PortProps = z.infer<typeof portProps>
 
@@ -668,8 +667,9 @@ export class Port extends PrimitiveComponent<typeof portProps> {
 
     const sourcePort = db.source_port.get(this.source_port_id!)
 
-    const isDrawnWithInversionCircle =
-      sourcePort?.port_hints?.some((hint) => hint.startsWith("INV_")) || false
+    const hasInversionCircle =
+      sourcePort?.port_hints?.some((hint) => hint.startsWith("INV_")) ||
+      false
     const schematicPortInsertProps: Omit<SchematicPort, "schematic_port_id"> = {
       type: "schematic_port",
       schematic_component_id: parentNormalComponent?.schematic_component_id!,
@@ -682,16 +682,10 @@ export class Port extends PrimitiveComponent<typeof portProps> {
       true_ccw_index: localPortInfo?.trueIndex,
       display_pin_label: bestDisplayPinLabel,
       is_connected: false,
-      is_drawn_with_inversion_circle: isDrawnWithInversionCircle,
+      is_drawn_with_inversion_circle: hasInversionCircle,
     }
 
     for (const attributes of this._getMatchingPinAttributes()) {
-      if (
-        "isDrawnWithInversionCircle" in attributes &&
-        attributes.isDrawnWithInversionCircle
-      ) {
-        schematicPortInsertProps.is_drawn_with_inversion_circle = true
-      }
       if (attributes.requiresPower) {
         schematicPortInsertProps.has_input_arrow = true
       }
