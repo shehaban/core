@@ -11,20 +11,23 @@ import type { Trace } from "../Trace/Trace"
 import type { LayerRef, SchematicPort } from "circuit-json"
 import { areAllPcbPrimitivesOverlapping } from "./areAllPcbPrimitivesOverlapping"
 import { getCenterOfPcbPrimitives } from "./getCenterOfPcbPrimitives"
-import { type PinAttributeMap, portProps as commonPortProps } from "@tscircuit/props"
+import {
+  type PinAttributeMap,
+  portProps as commonPortProps,
+} from "@tscircuit/props"
 import type { INormalComponent } from "lib/components/base-components/NormalComponent/INormalComponent"
 
 export const portProps = z.object({
-    name: z.string().optional(),
+  name: z.string().optional(),
   pinNumber: z.number().optional(),
   aliases: z.array(z.string()).optional(),
   layer: z.string().optional(),
-    layers: z.array(z.string()).optional(),
+  layers: z.array(z.string()).optional(),
   schX: z.number().optional(),
   schY: z.number().optional(),
   direction: z.enum(["up", "down", "left", "right"]).optional(),
   connectsTo: z.union([z.string(), z.array(z.string())]).optional(),
-  })
+})
 
 export type PortProps = z.infer<typeof portProps>
 
@@ -668,8 +671,7 @@ export class Port extends PrimitiveComponent<typeof portProps> {
     const sourcePort = db.source_port.get(this.source_port_id!)
 
     const hasInversionCircle =
-      sourcePort?.port_hints?.some((hint) => hint.startsWith("INV_")) ||
-      false
+      sourcePort?.port_hints?.some((hint) => hint.startsWith("INV_")) || false
     const schematicPortInsertProps: Omit<SchematicPort, "schematic_port_id"> = {
       type: "schematic_port",
       schematic_component_id: parentNormalComponent?.schematic_component_id!,
