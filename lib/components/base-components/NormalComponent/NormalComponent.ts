@@ -1,37 +1,39 @@
 import { fp } from "@tscircuit/footprinter"
+import { normalizeDegrees } from "@tscircuit/math-utils"
 import type {
+  CadModelGlb,
+  CadModelGltf,
   CadModelJscad,
   CadModelObj,
   CadModelProp,
+  CadModelStep,
   CadModelStl,
+  CadModelWrl,
   SchematicPortArrangement,
   SupplierPartNumbers,
-  CadModelGltf,
-  CadModelGlb,
-  CadModelStep,
-  CadModelWrl,
 } from "@tscircuit/props"
 import {
   distance,
-  pcb_manual_edit_conflict_warning,
   pcb_component_invalid_layer_error,
+  pcb_manual_edit_conflict_warning,
   point3,
   rotation,
   schematic_manual_edit_conflict_warning,
   unknown_error_finding_part,
 } from "circuit-json"
-import { decomposeTSR } from "transformation-matrix"
 import Debug from "debug"
+import { Trace } from "lib/components/primitive-components/Trace/Trace"
 import {
   type ReactSubtree,
   createInstanceFromReactElement,
 } from "lib/fiber/create-instance-from-react-element"
 import { underscorifyPinStyles } from "lib/soup/underscorifyPinStyles"
 import { underscorifyPortArrangement } from "lib/soup/underscorifyPortArrangement"
+import { getBoundsForSchematic } from "lib/utils/autorouting/getBoundsForSchematic"
 import { createNetsFromProps } from "lib/utils/components/createNetsFromProps"
 import { createComponentsFromCircuitJson } from "lib/utils/createComponentsFromCircuitJson"
+import { filterPinLabels } from "lib/utils/filterPinLabels"
 import { getBoundsOfPcbComponents } from "lib/utils/get-bounds-of-pcb-components"
-import { getBoundsForSchematic } from "lib/utils/autorouting/getBoundsForSchematic"
 import {
   getPinNumberFromLabels,
   getPortFromHints,
@@ -41,34 +43,32 @@ import {
   getAllDimensionsForSchematicBox,
   isExplicitPinMappingArrangement,
 } from "lib/utils/schematic/getAllDimensionsForSchematicBox"
+import { getNumericSchPinStyle } from "lib/utils/schematic/getNumericSchPinStyle"
 import { getPinsFromSideDefinition } from "lib/utils/schematic/normalizePinSideDefinition"
+import { parsePinNumberFromLabelsOrThrow } from "lib/utils/schematic/parsePinNumberFromLabelsOrThrow"
 import {
   type ReactElement,
   isValidElement as isReactElement,
   isValidElement,
 } from "react"
 import { type SchSymbol, symbols } from "schematic-symbols"
+import { decomposeTSR } from "transformation-matrix"
 import { ZodType, z } from "zod"
+import { CadAssembly } from "../../primitive-components/CadAssembly"
+import { CadModel } from "../../primitive-components/CadModel"
 import { Footprint } from "../../primitive-components/Footprint"
 import { Port } from "../../primitive-components/Port"
-import { CadModel } from "../../primitive-components/CadModel"
-import { CadAssembly } from "../../primitive-components/CadAssembly"
 import { PrimitiveComponent } from "../PrimitiveComponent"
-import { parsePinNumberFromLabelsOrThrow } from "lib/utils/schematic/parsePinNumberFromLabelsOrThrow"
-import { getNumericSchPinStyle } from "lib/utils/schematic/getNumericSchPinStyle"
 import type { INormalComponent } from "./INormalComponent"
-import { Trace } from "lib/components/primitive-components/Trace/Trace"
 import { NormalComponent__getMinimumFlexContainerSize } from "./NormalComponent__getMinimumFlexContainerSize"
 import { NormalComponent__repositionOnPcb } from "./NormalComponent__repositionOnPcb"
-import { NormalComponent_doInitialSourceDesignRuleChecks } from "./NormalComponent_doInitialSourceDesignRuleChecks"
-import { NormalComponent_doInitialSilkscreenOverlapAdjustment } from "./NormalComponent_doInitialSilkscreenOverlapAdjustment"
-import { filterPinLabels } from "lib/utils/filterPinLabels"
-import { NormalComponent_doInitialPcbFootprintStringRender } from "./NormalComponent_doInitialPcbFootprintStringRender"
 import { NormalComponent_doInitialPcbComponentAnchorAlignment } from "./NormalComponent_doInitialPcbComponentAnchorAlignment"
+import { NormalComponent_doInitialPcbFootprintStringRender } from "./NormalComponent_doInitialPcbFootprintStringRender"
+import { NormalComponent_doInitialSilkscreenOverlapAdjustment } from "./NormalComponent_doInitialSilkscreenOverlapAdjustment"
+import { NormalComponent_doInitialSourceDesignRuleChecks } from "./NormalComponent_doInitialSourceDesignRuleChecks"
 import { isHttpUrl } from "./utils/isHttpUrl"
-import { parseLibraryFootprintRef } from "./utils/parseLibraryFootprintRef"
-import { normalizeDegrees } from "@tscircuit/math-utils"
 import { isStaticAssetPath } from "./utils/isStaticAssetPath"
+import { parseLibraryFootprintRef } from "./utils/parseLibraryFootprintRef"
 
 const debug = Debug("tscircuit:core")
 
@@ -109,6 +109,8 @@ export class NormalComponent<
 {
   reactSubtrees: Array<ReactSubtree> = []
   _impliedFootprint?: string | undefined
+  _resolvedPcbCalcOffsetX: number | undefined
+  _resolvedPcbCalcOffsetY: number | undefined
 
   isPrimitiveContainer = true
   _isNormalComponent = true
@@ -1655,10 +1657,37 @@ export class NormalComponent<
 
     const { db } = this.root!
     const props = this._parsedProps
+    const rawProps = this.props as any
+
+    const pcbLeftEdgeX = props.pcbLeftEdgeX ?? rawProps.pcbLeftEdgeX
+    const pcbRightEdgeX = props.pcbRightEdgeX ?? rawProps.pcbRightEdgeX
+    const pcbTopEdgeY = props.pcbTopEdgeY ?? rawProps.pcbTopEdgeY
+    const pcbBottomEdgeY = props.pcbBottomEdgeY ?? rawProps.pcbBottomEdgeY
 
     const hasExplicitPcbPosition =
-      props.pcbX !== undefined || props.pcbY !== undefined
+      props.pcbX !== undefined ||
+      props.pcbY !== undefined ||
+      pcbLeftEdgeX !== undefined ||
+      pcbRightEdgeX !== undefined ||
+      pcbTopEdgeY !== undefined ||
+      pcbBottomEdgeY !== undefined
     if (!hasExplicitPcbPosition) return
+
+    if (pcbLeftEdgeX !== undefined && pcbRightEdgeX !== undefined) {
+      throw new Error(
+        `${this.componentName} cannot set both pcbLeftEdgeX and pcbRightEdgeX`,
+      )
+    }
+
+    if (pcbTopEdgeY !== undefined && pcbBottomEdgeY !== undefined) {
+      throw new Error(
+        `${this.componentName} cannot set both pcbTopEdgeY and pcbBottomEdgeY`,
+      )
+    }
+
+    const pcbComponent = db.pcb_component.get(this.pcb_component_id)
+    const componentWidth = pcbComponent?.width ?? 0
+    const componentHeight = pcbComponent?.height ?? 0
 
     const parentGroup = this.getGroup()
     const positionedRelativeToGroupId = parentGroup?.pcb_group_id ?? undefined
@@ -1667,12 +1696,36 @@ export class NormalComponent<
       ? undefined
       : (this._getBoard()?.pcb_board_id ?? undefined)
 
+    const resolvedPcbX =
+      this._resolvedPcbCalcOffsetX ??
+      (props.pcbX !== undefined
+        ? this._resolvePcbCoordinate(props.pcbX, "pcbX")
+        : pcbLeftEdgeX !== undefined
+          ? this._resolvePcbCoordinate(pcbLeftEdgeX, "pcbX") +
+            componentWidth / 2
+          : pcbRightEdgeX !== undefined
+            ? this._resolvePcbCoordinate(pcbRightEdgeX, "pcbX") -
+              componentWidth / 2
+            : undefined)
+
+    const resolvedPcbY =
+      this._resolvedPcbCalcOffsetY ??
+      (props.pcbY !== undefined
+        ? this._resolvePcbCoordinate(props.pcbY, "pcbY")
+        : pcbTopEdgeY !== undefined
+          ? this._resolvePcbCoordinate(pcbTopEdgeY, "pcbY") -
+            componentHeight / 2
+          : pcbBottomEdgeY !== undefined
+            ? this._resolvePcbCoordinate(pcbBottomEdgeY, "pcbY") +
+              componentHeight / 2
+            : undefined)
+
     db.pcb_component.update(this.pcb_component_id, {
       position_mode: "relative_to_group_anchor",
       positioned_relative_to_pcb_group_id: positionedRelativeToGroupId,
       positioned_relative_to_pcb_board_id: positionedRelativeToBoardId,
-      display_offset_x: props.pcbX,
-      display_offset_y: props.pcbY,
+      display_offset_x: resolvedPcbX as any,
+      display_offset_y: resolvedPcbY as any,
     })
   }
 
@@ -1699,9 +1752,18 @@ export class NormalComponent<
    * and should not be moved by automatic packing/layout algorithms
    */
   isRelativelyPositioned(): boolean {
+    const rawProps = this.props as any
     return (
       this._parsedProps.pcbX !== undefined ||
-      this._parsedProps.pcbY !== undefined
+      this._parsedProps.pcbY !== undefined ||
+      this._parsedProps.pcbLeftEdgeX !== undefined ||
+      this._parsedProps.pcbRightEdgeX !== undefined ||
+      this._parsedProps.pcbTopEdgeY !== undefined ||
+      this._parsedProps.pcbBottomEdgeY !== undefined ||
+      rawProps.pcbLeftEdgeX !== undefined ||
+      rawProps.pcbRightEdgeX !== undefined ||
+      rawProps.pcbTopEdgeY !== undefined ||
+      rawProps.pcbBottomEdgeY !== undefined
     )
   }
 }

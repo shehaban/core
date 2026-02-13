@@ -1,11 +1,12 @@
+import { convertSrjToGraphicsObject } from "@tscircuit/capacity-autorouter"
+import { getBoundsFromPoints } from "@tscircuit/math-utils"
 import {
   type AutorouterConfig,
   type SubcircuitGroupProps,
   groupProps,
 } from "@tscircuit/props"
-import { TscircuitAutorouter } from "lib/utils/autorouting/CapacityMeshAutorouter"
-import type { SimplifiedPcbTrace } from "lib/utils/autorouting/SimpleRouteJson"
 import {
+  type AnyCircuitElement,
   type LayerRef,
   type PcbTrace,
   type PcbVia,
@@ -14,39 +15,41 @@ import {
   distance,
 } from "circuit-json"
 import Debug from "debug"
+import type { GraphicsObject } from "graphics-debug"
+import type { IsolatedCircuit } from "lib/IsolatedCircuit"
+import type { PrimitiveComponent } from "lib/components/base-components/PrimitiveComponent"
+import { AutorouterError } from "lib/errors/AutorouterError"
+import { TscircuitAutorouter } from "lib/utils/autorouting/CapacityMeshAutorouter"
+import type { GenericLocalAutorouter } from "lib/utils/autorouting/GenericLocalAutorouter"
+import type { SimplifiedPcbTrace } from "lib/utils/autorouting/SimpleRouteJson"
 import type { SimpleRouteJson } from "lib/utils/autorouting/SimpleRouteJson"
+import { createSourceTracesFromOffboardConnections } from "lib/utils/autorouting/createSourceTracesFromOffboardConnections"
+import { getPresetAutoroutingConfig } from "lib/utils/autorouting/getPresetAutoroutingConfig"
+import { getBoundsOfPcbComponents } from "lib/utils/get-bounds-of-pcb-components"
+import { getViaDiameterDefaults } from "lib/utils/pcbStyle/getViaDiameterDefaults"
+import { getSimpleRouteJsonFromCircuitJson } from "lib/utils/public-exports"
 import { z } from "zod"
 import { NormalComponent } from "../../base-components/NormalComponent/NormalComponent"
 import type { Trace } from "../Trace/Trace"
 import { TraceHint } from "../TraceHint"
-import type { ISubcircuit } from "./Subcircuit/ISubcircuit"
-import { getSimpleRouteJsonFromCircuitJson } from "lib/utils/public-exports"
-import type { GenericLocalAutorouter } from "lib/utils/autorouting/GenericLocalAutorouter"
-import type { PrimitiveComponent } from "lib/components/base-components/PrimitiveComponent"
-import { getBoundsOfPcbComponents } from "lib/utils/get-bounds-of-pcb-components"
-import { getBoundsFromPoints } from "@tscircuit/math-utils"
+import { Group_doInitialPcbCalcPlacementResolution } from "./Group_doInitialPcbCalcPlacementResolution"
+import { Group_doInitialPcbComponentAnchorAlignment } from "./Group_doInitialPcbComponentAnchorAlignment"
+import { Group_doInitialPcbLayoutFlex } from "./Group_doInitialPcbLayoutFlex"
+import { Group_doInitialPcbLayoutGrid } from "./Group_doInitialPcbLayoutGrid"
+import { Group_doInitialPcbLayoutPack } from "./Group_doInitialPcbLayoutPack/Group_doInitialPcbLayoutPack"
+import { Group_doInitialRenderIsolatedSubcircuits } from "./Group_doInitialRenderIsolatedSubcircuits"
+import { Group_doInitialSchematicLayoutFlex } from "./Group_doInitialSchematicLayoutFlex"
+import { Group_doInitialSchematicLayoutGrid } from "./Group_doInitialSchematicLayoutGrid"
 import { Group_doInitialSchematicLayoutMatchAdapt } from "./Group_doInitialSchematicLayoutMatchAdapt"
 import { Group_doInitialSchematicLayoutMatchPack } from "./Group_doInitialSchematicLayoutMatchPack"
-import { Group_doInitialSourceAddConnectivityMapKey } from "./Group_doInitialSourceAddConnectivityMapKey"
-import { getViaDiameterDefaults } from "lib/utils/pcbStyle/getViaDiameterDefaults"
-import { Group_doInitialSchematicLayoutGrid } from "./Group_doInitialSchematicLayoutGrid"
-import { Group_doInitialSchematicLayoutFlex } from "./Group_doInitialSchematicLayoutFlex"
-import { Group_doInitialPcbLayoutGrid } from "./Group_doInitialPcbLayoutGrid"
-import { AutorouterError } from "lib/errors/AutorouterError"
-import { getPresetAutoroutingConfig } from "lib/utils/autorouting/getPresetAutoroutingConfig"
-import { Group_doInitialPcbLayoutPack } from "./Group_doInitialPcbLayoutPack/Group_doInitialPcbLayoutPack"
-import { Group_doInitialPcbLayoutFlex } from "./Group_doInitialPcbLayoutFlex"
-import { convertSrjToGraphicsObject } from "@tscircuit/capacity-autorouter"
-import type { GraphicsObject } from "graphics-debug"
-import { createSourceTracesFromOffboardConnections } from "lib/utils/autorouting/createSourceTracesFromOffboardConnections"
 import { Group_doInitialSchematicTraceRender } from "./Group_doInitialSchematicTraceRender/Group_doInitialSchematicTraceRender"
 import { Group_doInitialSimulationSpiceEngineRender } from "./Group_doInitialSimulationSpiceEngineRender"
-import { Group_doInitialPcbComponentAnchorAlignment } from "./Group_doInitialPcbComponentAnchorAlignment"
-import { computeCenterFromAnchorPosition } from "./utils/computeCenterFromAnchorPosition"
-import type { Board } from "index"
+import { Group_doInitialSourceAddConnectivityMapKey } from "./Group_doInitialSourceAddConnectivityMapKey"
+import type { ISubcircuit } from "./Subcircuit/ISubcircuit"
+import { addPortIdsToTracesAtJumperPads } from "./add-port-ids-to-traces-at-jumper-pads"
 import { insertAutoplacedJumpers } from "./insert-autoplaced-jumpers"
 import { splitPcbTracesOnJumperSegments } from "./split-pcb-traces-on-jumper-segments"
-import { addPortIdsToTracesAtJumperPads } from "./add-port-ids-to-traces-at-jumper-pads"
+import { computeCenterFromAnchorPosition } from "./utils/computeCenterFromAnchorPosition"
 
 export class Group<Props extends z.ZodType<any, any, any> = typeof groupProps>
   extends NormalComponent<Props>
@@ -60,7 +63,15 @@ export class Group<Props extends z.ZodType<any, any, any> = typeof groupProps>
 
   _isInflatedFromCircuitJson = false
 
-  private _normalComponentNameMap: Map<string, NormalComponent[]> | null = null
+  _isolatedCircuitJson: AnyCircuitElement[] | null = null
+
+  _isolatedCircuit: IsolatedCircuit | null = null
+
+  get _isIsolatedSubcircuit(): boolean {
+    return Boolean(this._parsedProps._subcircuitCachingEnabled)
+  }
+
+  _normalComponentNameMap: Map<string, NormalComponent[]> | null = null
 
   /**
    * Returns a cached map of component names to NormalComponent instances within this subcircuit.
@@ -114,6 +125,17 @@ export class Group<Props extends z.ZodType<any, any, any> = typeof groupProps>
       zodProps: groupProps as unknown as Props,
       componentName: "Group",
     }
+  }
+
+  override runRenderCycle() {
+    if (!this._isIsolatedSubcircuit || !this.root) {
+      super.runRenderCycle()
+      return
+    }
+
+    if (!Group_doInitialRenderIsolatedSubcircuits(this)) return
+
+    super.runRenderCycle()
   }
 
   doInitialSourceGroupRender() {
@@ -563,6 +585,10 @@ export class Group<Props extends z.ZodType<any, any, any> = typeof groupProps>
     // Enable jumpers for auto_jumper preset
     if (isAutoJumperPreset) {
       simpleRouteJson.allowJumpers = true
+      if (autorouterConfig.availableJumperTypes) {
+        simpleRouteJson.availableJumperTypes =
+          autorouterConfig.availableJumperTypes
+      }
     }
 
     if (debug.enabled) {
@@ -947,6 +973,7 @@ export class Group<Props extends z.ZodType<any, any, any> = typeof groupProps>
 
   _getSchematicLayoutMode(): "match-adapt" | "flex" | "grid" | "relative" {
     const props = this._parsedProps as SubcircuitGroupProps
+    const schAutoLayoutEnabled = props.schAutoLayoutEnabled ?? false
     if (props.schLayout?.layoutMode === "none") return "relative"
     if (props.schLayout?.layoutMode === "relative") return "relative"
     if (props.schLayout?.matchAdapt) return "match-adapt"
@@ -969,8 +996,13 @@ export class Group<Props extends z.ZodType<any, any, any> = typeof groupProps>
     const hasManualEdits =
       (props.manualEdits?.schematic_placements?.length ?? 0) > 0
 
-    // Use match-adapt if no explicit positioning is set, even with group children
-    // This allows nested groups to be laid out properly
+    // For boards, schAutoLayoutEnabled should keep auto layout enabled for
+    // unpositioned children even if some siblings have explicit schX/schY.
+    // Explicitly positioned children are skipped by matchpack.
+    if (schAutoLayoutEnabled && !hasManualEdits) return "match-adapt"
+
+    // Use match-adapt if no explicit positioning is set, even with group
+    // children. This allows nested groups to be laid out properly.
     if (!anyChildHasSchCoords && !hasManualEdits) return "match-adapt"
     return "relative"
   }
@@ -1010,6 +1042,7 @@ export class Group<Props extends z.ZodType<any, any, any> = typeof groupProps>
 
   _getPcbLayoutMode(): "grid" | "flex" | "match-adapt" | "pack" | "none" {
     const props = this._parsedProps as SubcircuitGroupProps
+    const rawProps = this.props as any
     if (this._isInflatedFromCircuitJson) return "none"
     if (props.pcbRelative) return "none"
     if (props.pcbLayout?.matchAdapt) return "match-adapt"
@@ -1030,7 +1063,17 @@ export class Group<Props extends z.ZodType<any, any, any> = typeof groupProps>
     // pcb coordinates and no manual edits are present. Relatively positioned
     // components (with pcbX/pcbY) will be excluded from packing, while others
     // will be packed together.
-    const groupHasCoords = props.pcbX !== undefined || props.pcbY !== undefined
+    const groupHasCoords =
+      props.pcbX !== undefined ||
+      props.pcbY !== undefined ||
+      props.pcbLeftEdgeX !== undefined ||
+      props.pcbRightEdgeX !== undefined ||
+      props.pcbTopEdgeY !== undefined ||
+      props.pcbBottomEdgeY !== undefined ||
+      rawProps.pcbLeftEdgeX !== undefined ||
+      rawProps.pcbRightEdgeX !== undefined ||
+      rawProps.pcbTopEdgeY !== undefined ||
+      rawProps.pcbBottomEdgeY !== undefined
     const hasManualEdits = (props.manualEdits?.pcb_placements?.length ?? 0) > 0
 
     const unpositionedDirectChildrenCount = this.children.reduce(
@@ -1041,8 +1084,18 @@ export class Group<Props extends z.ZodType<any, any, any> = typeof groupProps>
         }
 
         const childProps = child._parsedProps
+        const rawChildProps = child.props as any
         const hasCoords =
-          childProps?.pcbX !== undefined || childProps?.pcbY !== undefined
+          childProps?.pcbX !== undefined ||
+          childProps?.pcbY !== undefined ||
+          childProps?.pcbLeftEdgeX !== undefined ||
+          childProps?.pcbRightEdgeX !== undefined ||
+          childProps?.pcbTopEdgeY !== undefined ||
+          childProps?.pcbBottomEdgeY !== undefined ||
+          rawChildProps?.pcbLeftEdgeX !== undefined ||
+          rawChildProps?.pcbRightEdgeX !== undefined ||
+          rawChildProps?.pcbTopEdgeY !== undefined ||
+          rawChildProps?.pcbBottomEdgeY !== undefined
         return count + (hasCoords ? 0 : 1)
       },
       0,
@@ -1350,6 +1403,14 @@ export class Group<Props extends z.ZodType<any, any, any> = typeof groupProps>
 
   updatePcbComponentAnchorAlignment(): void {
     this.doInitialPcbComponentAnchorAlignment()
+  }
+
+  doInitialPcbCalcPlacementResolution(): void {
+    Group_doInitialPcbCalcPlacementResolution(this)
+  }
+
+  updatePcbCalcPlacementResolution(): void {
+    this.doInitialPcbCalcPlacementResolution()
   }
 
   /**
